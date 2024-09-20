@@ -16,32 +16,57 @@ var (
 
 // XDPIPConn is a IPv4 connection that uses XDP to send and receive IP packets in batch.
 type XDPIPv4Conn struct {
-	iface  *net.Interface
-	srcIP  string
-	srcMAC net.HardwareAddr
-
+	queueID int
+	// for sender
+	iface   *net.Interface
+	srcIP   string
+	srcMAC  net.HardwareAddr
 	dstMacs *syncx.Map[string, net.HardwareAddr]
+
+	// for receiver
+	prog *Program
 
 	sock *Socket
 }
 
 // NewXDPIPv4Conn creates a new XDPIPv4Conn.
-func NewXDPIPv4Conn(localIP string, QueueID int, options *SocketOptions) (*XDPIPv4Conn, error) {
+func NewXDPIPv4Conn(localIP string, queueID int, options *SocketOptions, prog *Program) (*XDPIPv4Conn, error) {
 	iface, _, err := GetInterfaceForIP(localIP)
 	if err != nil {
 		return nil, err
 	}
 
-	sock, err := NewSocket(iface.Index, QueueID, options)
+	sock, err := NewSocket(iface.Index, queueID, options)
 	if err != nil {
 		return nil, err
 	}
 
+	if prog != nil {
+		if err := prog.Attach(iface.Index); err != nil {
+			sock.Close()
+			return nil, fmt.Errorf("failed to attach XDP program: %w", err)
+		}
+
+		fmt.Println("attached")
+
+		if err := prog.Register(queueID, sock.FD()); err != nil {
+			prog.Detach(iface.Index)
+			sock.Close()
+			return nil, fmt.Errorf("failed to register XDP program: %w", err)
+		}
+
+		fmt.Println("registered")
+	}
+
 	conn := &XDPIPv4Conn{
+		queueID: queueID,
+
 		iface:   iface,
 		srcIP:   localIP,
 		srcMAC:  iface.HardwareAddr,
 		dstMacs: &syncx.Map[string, net.HardwareAddr]{},
+
+		prog: prog,
 
 		sock: sock,
 	}
@@ -53,12 +78,12 @@ func (c *XDPIPv4Conn) Socket() *Socket {
 	return c.sock
 }
 
-// WriteTo writes IP packets to the given destination IP.
+// Send sends IP packets to the given destination IP.
 // pkts is a slice of eth packets.
 // dstIP is the destination IP address.
 // It returns the count of packets written and an error, if any.
 // You **must**  the rest of the packets in the slice. Drop them or resend up to you.
-func (c *XDPIPv4Conn) WriteTo(pkts [][]byte, dstIP string) (int, error) {
+func (c *XDPIPv4Conn) Send(pkts [][]byte, dstIP string) (int, error) {
 	n := len(pkts)
 	descs := c.sock.GetDescs(n, false) // Get n tx descriptors from the socket.
 	for i := range descs {
@@ -73,8 +98,8 @@ func (c *XDPIPv4Conn) WriteTo(pkts [][]byte, dstIP string) (int, error) {
 	return completed, err
 }
 
-// WriteToIP writes IP packets to the given destination IPs.
-func (c *XDPIPv4Conn) WriteToIP(pkts [][]byte, dstIPs []string) (int, error) {
+// SendTo sends IP packets to the given destination IPs.
+func (c *XDPIPv4Conn) SendTo(pkts [][]byte, dstIPs []string) (int, error) {
 	if len(pkts) != len(dstIPs) {
 		return 0, ErrPacketIPMismatch
 	}
@@ -138,7 +163,6 @@ func (c *XDPIPv4Conn) BuildIPPacket(srcIP, dstIP string, srcPort, dstPort int, t
 		if err != nil {
 			return nil, err
 		}
-		fmt.Println("@@@@@", dstIP, mac.String())
 		dstMAC = mac
 		c.dstMacs.Store(dstIP, dstMAC)
 	}
@@ -174,7 +198,48 @@ func (c *XDPIPv4Conn) BuildIPPacket(srcIP, dstIP string, srcPort, dstPort int, t
 	return buf.Bytes(), nil
 }
 
+// ReadFrom reads IP packets from the connection.
+// You **must** copy the packets to another buffer if you want to handle it in other goroutines.
+func (c *XDPIPv4Conn) ReadFrom() (pkts [][]byte, err error) {
+	if c.prog == nil {
+		return nil, errors.New("no program set")
+	}
+
+	xsk := c.sock
+	if n := xsk.NumFreeFillSlots(); n > 0 {
+		xsk.Fill(xsk.GetDescs(n, true)) // Fill the free slots with Rx descriptors.
+	}
+
+	// Wait for receive - meaning the kernel has
+	// produced one or more descriptors filled with a received
+	// frame onto the Rx ring queue.
+	numRx, _, err := xsk.Poll(-1)
+	if err != nil {
+		return nil, err
+	}
+
+	if numRx > 0 {
+		rxDescs := xsk.Receive(numRx)
+
+		for i := 0; i < len(rxDescs); i++ {
+			pktData := xsk.GetFrame(rxDescs[i])
+			pkts = append(pkts, pktData)
+		}
+	}
+
+	return pkts, nil
+}
+
 // Close closes the connection.
 func (c *XDPIPv4Conn) Close() error {
-	return c.sock.Close()
+	if c.sock != nil {
+		c.sock.Close()
+	}
+	if c.prog != nil {
+		c.prog.Unregister(c.queueID)
+		c.prog.Detach(c.iface.Index)
+		c.prog.Close()
+	}
+
+	return nil
 }

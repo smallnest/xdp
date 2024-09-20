@@ -8,6 +8,8 @@ package main
 import (
 	"flag"
 	"fmt"
+	"os"
+	"os/signal"
 	"time"
 
 	xdp "github.com/smallnest/xdp"
@@ -26,7 +28,7 @@ var (
 
 func main() {
 	flag.IntVar(&QueueID, "queue", 0, "The queue on the network interface to attach to.")
-	flag.StringVar(&SrcIP, "srcip", "192.168.3.46", "Source IP address to use in sent frames.")
+	flag.StringVar(&SrcIP, "srcip", "192.168.1.11", "Source IP address to use in sent frames.")
 	flag.StringVar(&DstIP, "dstip", "192.168.3.15", "Destination IP address to use in sent frames.")
 	flag.UintVar(&SrcPort, "srcport", 12345, "Source UDP port.")
 	flag.UintVar(&DstPort, "dstport", 54321, "Destination UDP port.")
@@ -35,7 +37,7 @@ func main() {
 
 	flag.Parse()
 
-	conn, err := xdp.NewXDPIPv4Conn(SrcIP, QueueID, nil)
+	conn, err := xdp.NewXDPIPv4Conn(SrcIP, QueueID, nil, nil)
 	if err != nil {
 		panic(err)
 	}
@@ -48,6 +50,7 @@ func main() {
 
 	fmt.Printf("sending UDP packets from %v  to %v ...\n", SrcIP, DstIP)
 
+	// calc send stat
 	go func() {
 		var err error
 		var prev xdp.Stats
@@ -67,23 +70,32 @@ func main() {
 		}
 	}()
 
-	index := 0
-	data := make([][]byte, Batch)
-	for {
-		for i := 0; i < Batch; i++ {
-			index++
-			payload := make([]byte, PayloadSize)
-			flag := fmt.Sprintf("packet id: %d, time:%d\n", index, time.Now().UnixNano())
-			copy(payload, flag)
-			data[i], _ = conn.BuildIPPacket(SrcIP, DstIP, int(SrcPort), int(DstPort), 64, 0, payload)
+	go func() {
+		index := 0
+		data := make([][]byte, Batch)
+		for {
+			for i := 0; i < Batch; i++ {
+				index++
+				payload := make([]byte, PayloadSize)
+				flag := fmt.Sprintf("packet id: %d, time:%d\n", index, time.Now().UnixNano())
+				copy(payload, flag)
+				data[i], _ = conn.BuildIPPacket(SrcIP, DstIP, int(SrcPort), int(DstPort), 64, 0, payload)
+			}
+
+			n, err := conn.Send(data, DstIP)
+			if err != nil {
+				panic(err)
+			}
+			fmt.Printf("sent %d packets\n", n)
+
+			time.Sleep(time.Second)
 		}
 
-		n, err := conn.WriteTo(data, DstIP)
-		if err != nil {
-			panic(err)
-		}
-		fmt.Printf("sent %d packets\n", n)
+	}()
 
-		time.Sleep(time.Second)
-	}
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt)
+	<-sig
+
+	conn.Close()
 }
