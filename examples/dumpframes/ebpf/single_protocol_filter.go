@@ -3,8 +3,8 @@ package ebpf
 import (
 	"fmt"
 
-	"github.com/asavie/xdp"
 	"github.com/cilium/ebpf"
+	xdp "github.com/smallnest/xdp"
 )
 
 // go generate requires appropriate linux headers in included (-I) paths.

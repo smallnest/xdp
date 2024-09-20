@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/asavie/xdp"
+	xdp "github.com/smallnest/xdp"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 )

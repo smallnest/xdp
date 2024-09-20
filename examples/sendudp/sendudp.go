@@ -13,9 +13,9 @@ import (
 	"net"
 	"time"
 
-	"github.com/asavie/xdp"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
+	xdp "github.com/smallnest/xdp"
 	"github.com/vishvananda/netlink"
 )
 

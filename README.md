@@ -1,4 +1,4 @@
-**The project is continued here:** https://github.com/slavc/xdp
+This project is forked from https://github.com/asavie/xdp and adds some more friendly APIs for XDP programming.
 
 https://github.com/asavie/xdp is now archived.
 
@@ -6,11 +6,24 @@ https://github.com/asavie/xdp is now archived.
 
 # xdp
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/asavie/xdp.svg)](https://pkg.go.dev/github.com/asavie/xdp)
+[![Go Reference](https://pkg.go.dev/badge/github.com/smallnest/xdp.svg)](https://pkg.go.dev/github.com/smallnest/xdp)
 
-Package github.com/asavie/xdp allows one to use [XDP sockets](https://lwn.net/Articles/750845/) from the Go programming language.
+Package github.com/smallnest/xdp allows one to use [XDP sockets](https://lwn.net/Articles/750845/) from the Go programming language.
 
-For usage examples, see the [documentation](https://pkg.go.dev/github.com/asavie/xdp) or the [examples/](https://github.com/asavie/xdp/tree/master/examples) directory.
+`AF_XDP` sockets are a new socket type that allows one to send and receive packets directly from the Linux kernel bypassing the network stack. This can be useful for high-performance networking applications. It is supported in Linux kernel 4.18 and later.
+
+For usage examples, see the [documentation](https://pkg.go.dev/github.com/smallnest/xdp) or the [examples/](https://github.com/smallnest/xdp/tree/master/examples) directory.
+
+## Usage
+
+### General Send Packets
+
+
+### General Receive Packets
+
+
+
+
 
 ## Performance
 
